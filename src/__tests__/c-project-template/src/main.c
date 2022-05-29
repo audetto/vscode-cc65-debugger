@@ -1,9 +1,16 @@
-#include <conio.h>
+#include <stdio.h>
 
 unsigned char main(void) {
-    cputs("hello world");
+    int a;
 
-    while(1);
+    printf("Hello world\n");
+
+    for (a = 0; a < 10; ++a)
+    {
+        printf("A = %d\n", a);
+    }
+
+    printf("Done\n");
 
     return 0;
 }

@@ -80,10 +80,11 @@
             "type": "cc65-vice",
             "request": "launch",
             "name": "CC65 Vice Launch (Apple ][)",
-            "program": "${workspaceFolder}/program.apple2",
+            "program": "${workspaceFolder}/program.apple2.dsk",
             "debugFile": "${workspaceFolder}/program.apple2.dbg",
             "mapFile": "${workspaceFolder}/program.apple2.map",
             "build": {
+                "skip": true,
                 "cwd": "${workspaceFolder}",
                 "command": "make",
                 "args": [
@@ -94,6 +95,25 @@
             "stopOnExit": true,
             "emulatorArgs": [
             ],
+        },
+        {
+            "type": "cc65-vice",
+            "request": "attach",
+            "name": "CC65 Vice Attach (Apple ][)",
+            "program": "${workspaceFolder}/program.apple2.dsk",
+            "debugFile": "${workspaceFolder}/program.apple2.dbg",
+            "mapFile": "${workspaceFolder}/program.apple2.map",
+            "build": {
+                "skip": true,
+                "cwd": "${workspaceFolder}",
+                "command": "make",
+                "args": [
+                    "OPTIONS=mapfile,labelfile,debugfile"
+                ]
+            },
+            "stopOnEntry": true,
+            "stopOnExit": true,
+            "port": 6502,
         },
         {
             "type": "cc65-vice",

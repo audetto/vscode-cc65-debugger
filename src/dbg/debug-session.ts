@@ -485,7 +485,7 @@ export class CC65ViceDebugSession extends LoggingDebugSession {
                 : undefined,
                 args.viceDirectory,
                 args.mesenDirectory,
-                args.appleWinDirectory,
+                "/home/andrea/projects/cvs/a2e/build",
                 args.emulatorArgs,
                 args.preferX64OverX64sc,
                 args.debugFile,

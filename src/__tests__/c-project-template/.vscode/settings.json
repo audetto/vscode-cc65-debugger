@@ -1,0 +1,6 @@
+{
+  "cc65vice.enableCycleCounters": false,
+  "cc65vice.appleWinDirectory": "/home/andrea/projects/cvs/a2e/build",
+  "cc65vice.viceDirectory": "/home/andrea/projects/cvs/a2e/build",
+  "cc65vice.cc65Home": "/home/andrea/projects/cvs/3rdParty/cc65"
+}
