@@ -9,7 +9,7 @@
 
 # Space or comma separated list of cc65 supported target platforms to build for.
 # Default: c64 (lowercase!)
-TARGETS := c64 pet apple2
+TARGETS := c64 pet apple2 apple2enh
 
 # Name of the final, single-file executable.
 # Default: name of the current dir with target name appended
