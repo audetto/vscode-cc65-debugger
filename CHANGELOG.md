@@ -1,5 +1,41 @@
 # Changelog
 
+### [6.3.7](https://www.github.com/empathicqubit/vscode-cc65-debugger/compare/v6.3.6...v6.3.7) (2022-10-29)
+
+
+### Bug Fixes
+
+* Fix problem with UI styling and loading ([9f65493](https://www.github.com/empathicqubit/vscode-cc65-debugger/commit/9f654939ff34425ba0b167e9a9fca5d4d79f7c45))
+
+### [6.3.6](https://www.github.com/empathicqubit/vscode-cc65-debugger/compare/v6.3.5...v6.3.6) (2022-10-13)
+
+
+### Bug Fixes
+
+* Force rerender when visible text editor changes ([043c76d](https://www.github.com/empathicqubit/vscode-cc65-debugger/commit/043c76d67c374f068dad63071709b41f0085c099))
+
+### [6.3.5](https://www.github.com/empathicqubit/vscode-cc65-debugger/compare/v6.3.4...v6.3.5) (2022-10-13)
+
+
+### Bug Fixes
+
+* Cache the program data file ([5ac2003](https://www.github.com/empathicqubit/vscode-cc65-debugger/commit/5ac2003e99e7f114e292d7e7338986c9de38eb4c))
+
+### [6.3.4](https://www.github.com/empathicqubit/vscode-cc65-debugger/compare/v6.3.3...v6.3.4) (2022-10-13)
+
+
+### Bug Fixes
+
+* Invalidate cycle counts if debug file is updated ([a983da1](https://www.github.com/empathicqubit/vscode-cc65-debugger/commit/a983da13c0f568faa8ee957f1c5a1e76badd4355))
+
+### [6.3.3](https://www.github.com/empathicqubit/vscode-cc65-debugger/compare/v6.3.2...v6.3.3) (2022-10-12)
+
+
+### Bug Fixes
+
+* catch errors on termination ([1f19c30](https://www.github.com/empathicqubit/vscode-cc65-debugger/commit/1f19c306cc9fc3f43253a6e618f5353daf6031d4))
+* Update decorations frequently based on document version change ([a758c06](https://www.github.com/empathicqubit/vscode-cc65-debugger/commit/a758c06fecafef59bf9a0cd1546ebe15c83c12d3))
+
 ### [6.3.2](https://www.github.com/empathicqubit/vscode-cc65-debugger/compare/v6.3.1...v6.3.2) (2022-05-29)
 
 
