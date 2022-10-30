@@ -14,5 +14,6 @@ REMOVES += $(PROGRAM).dsk
 
 $(PROGRAM).dsk: $(PROGRAM) prodos.dsk
 	cp prodos.dsk $@
+	java -jar $(AC) -as $@ startup            < $<
 	java -jar $(AC) -as $@ program            < $<
 	java -jar $(AC) -p  $@ program.system sys < $(shell cl65 --print-target-path)/$(TARGETS)/util/loader.system
