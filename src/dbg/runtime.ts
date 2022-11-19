@@ -10,6 +10,7 @@ import _last from 'lodash/fp/last';
 import _map from 'lodash/fp/map';
 import _uniq from 'lodash/fp/uniq';
 import _uniqBy from 'lodash/fp/uniqBy';
+import _groupBy from 'lodash/fp/groupBy';
 import * as path from 'path';
 import * as tmp from 'tmp';
 import * as util from 'util';
@@ -168,6 +169,9 @@ export class Runtime extends EventEmitter {
         // Try to determine if we are loaded and wait if not
         await this._attachWait();
 
+        await this.continue();
+        this._emulator.ping();
+
         console.timeEnd('emulator');
 
         await this._postFullStart(stopOnEntry);
@@ -214,62 +218,79 @@ export class Runtime extends EventEmitter {
         this._currentPosition = debugUtils.getLineFromAddress(this._breakPoints, this._dbgFile, address);
     }
 
-    private async _attachWait() : Promise<void> {
+    private async _attachWait(ignoreEvents: boolean = true) : Promise<void> {
         if(!this._dbgFile.codeSeg) {
             return;
         }
 
         const scopes = this._dbgFile.scopes.filter(x => x.codeSpan && x.name.startsWith("_") && x.size > disassembly.maxOpCodeSize);
-        const firstLastScopes = _uniq([_first(scopes)!, _last(scopes)!]);
 
-        if(!await this._validateLoad(firstLastScopes)) {
+        const waitTimeout = setTimeout(() => {
             this.sendMessage({
                 level: debugUtils.ExtensionMessageLevel.information,
                 content: 'Waiting for program to start...',
                 items: this._attachProgram ? ['Autostart'] : [],
             });
-            await this._emulator.withAllBreaksDisabled(async () => {
-                const storeCmds = _flow(
-                    _map((x: typeof firstLastScopes[0]) => [ x.codeSpan!.absoluteAddress, x.codeSpan!.absoluteAddress + x.codeSpan!.size - 1]),
-                    _flatten,
-                    _map((x: number) => {
-                        const val : bin.CheckpointSetCommand = {
-                            type: bin.CommandType.checkpointSet,
-                            startAddress: x,
-                            endAddress: x,
-                            stop: true,
-                            enabled: true,
-                            temporary: false,
-                            operation: bin.CpuOperation.store,
-                        };
-                        return val;
-                    })
-                )(firstLastScopes);
+        }, 3000);
+        if(scopes.length) {
+            const firstLastScopes = _uniq([_first(scopes)!, _last(scopes)!]);
+            if(!await this._validateLoad(firstLastScopes)) {
+                await this._emulator.withAllBreaksDisabled(async () => {
+                    const storeCmds = _flow(
+                        _map((x: typeof firstLastScopes[0]) => [ x.codeSpan!.absoluteAddress, x.codeSpan!.absoluteAddress + x.codeSpan!.size - 1]),
+                        _flatten,
+                        _map((x: number) => {
+                            const val : bin.CheckpointSetCommand = {
+                                type: bin.CommandType.checkpointSet,
+                                startAddress: x,
+                                endAddress: x,
+                                stop: true,
+                                enabled: true,
+                                temporary: false,
+                                operation: bin.CpuOperation.store,
+                            };
+                            return val;
+                        })
+                    )(firstLastScopes);
 
-                const storeReses : bin.CheckpointInfoResponse[] = await this._emulator.multiExecBinary(storeCmds);
+                    const storeReses : bin.CheckpointInfoResponse[] = await this._emulator.multiExecBinary(storeCmds);
 
-                this._ignoreEvents = true;
-                do {
-                    await this.continue();
-                    await this._emulator.waitForStop();
-                } while(!await this._validateLoad(firstLastScopes))
-                this._ignoreEvents = false;
+                    const entryRes = await this._emulator.execBinary({
+                        type: bin.CommandType.checkpointSet,
+                        startAddress: this._dbgFile.entryAddress,
+                        endAddress: this._dbgFile.entryAddress,
+                        stop: true,
+                        enabled: true,
+                        operation: bin.CpuOperation.exec,
+                        temporary: false,
+                    });
 
-                const delCmds : bin.CheckpointDeleteCommand[] = storeReses
-                    .map(x => ({
-                            type: bin.CommandType.checkpointDelete,
-                            id: x.id,
-                    }));
-                await this._emulator.multiExecBinary(delCmds);
-            });
+                    this._ignoreEvents = ignoreEvents;
+                    do {
+                        await this.continue();
+                        await this._emulator.waitForStop();
+                    } while(!await this._validateLoad(firstLastScopes))
+                    this._ignoreEvents = false;
 
-            this.sendMessage({
-                level: debugUtils.ExtensionMessageLevel.information,
-                content: 'Program started.',
-            })
+                    const delCmds : bin.CheckpointDeleteCommand[] = [...storeReses, entryRes]
+                        .map(x => ({
+                                type: bin.CommandType.checkpointDelete,
+                                id: x.id,
+                        }));
+                    await this._emulator.multiExecBinary(delCmds);
+                });
+
+                this.sendMessage({
+                    level: debugUtils.ExtensionMessageLevel.information,
+                    content: 'Program started.',
+                })
+            }
         }
+        else {
+            await this._emulator.waitForStop(this._dbgFile.entryAddress, undefined, true);
+        }
+        clearTimeout(waitTimeout);
 
-        await this.continue();
         await this._emulator.ping();
     }
 
@@ -466,6 +487,10 @@ export class Runtime extends EventEmitter {
 
         console.timeEnd('emulator');
 
+        if(this._machineType !== debugFile.MachineType.nes) {
+            await this._postEmulatorStart();
+        }
+
         try {
             await this._emulator.autostart(program);
         }
@@ -473,10 +498,11 @@ export class Runtime extends EventEmitter {
             throw new Error('Could not autostart program. Do you have the correct path?');
         }
 
-        await this._postEmulatorStart();
+        if(this._machineType === debugFile.MachineType.nes) {
+            await this._postEmulatorStart();
+        }
 
-        await this.continue();
-        await this._emulator.waitForStop(this._dbgFile.entryAddress, undefined, true);
+        await this._attachWait(false);
 
         await this._postFullStart(stopOnEntry);
     }
@@ -888,8 +914,10 @@ or define the location manually with the launch.json->mapFile setting`
     public async pause() {
         await this._emulator.ping();
         await this._doRunAhead();
-        const args = [ null, this._currentPosition.file!.name, this._currentPosition.num, 0];
-        this.sendEvent('stopOnStep', null, ...args);
+        if(this._currentPosition) {
+            const args = [ null, this._currentPosition.file!.name, this._currentPosition.num, 0];
+            this.sendEvent('stopOnStep', null, ...args);
+        }
     }
 
     public async stack(startFrame: number, endFrame: number): Promise<any> {
@@ -972,6 +1000,52 @@ or define the location manually with the launch.json->mapFile setting`
 
     public async setMemory(addr: number, memory: Buffer) : Promise<void> {
         await this._emulator.setMemory(addr, memory);
+    }
+
+    public async disassemble(addr: number, instructionCount: number): Promise<disassembly.Instruction[]> {
+        if(!this._dbgFile || !this._emulator || this._emulatorStarting || this._emulatorRunning) {
+            return [];
+        }
+
+        if(addr < 0 || addr > 0xffff) {
+            addr = this._currentAddress || 0;
+        }
+
+        if(instructionCount < 0) {
+            instructionCount = 10;
+        }
+
+        let size = instructionCount * disassembly.maxOpCodeSize;
+        if(addr + size > 0xffff) {
+            size = 0xffff - addr;
+        }
+
+        return disassembly.disassemble(await this.getMemory(addr, size), this._dbgFile, this._mapFile, addr);
+    }
+
+    public async disassembleLine(filename: string, line: number, count: number) : Promise<disassembly.Instruction[]> {
+        if(!this._dbgFile || !this._emulator || this._emulatorStarting || this._emulatorRunning) {
+            return [];
+        }
+
+        const file = this._dbgFile.files.find(x => !path.relative(filename, x.name));
+
+        if(!file) {
+            return [];
+        }
+
+        const lines = file.lines.filter(x => x.num >= line && x.num < line + count);
+        const start = _first(lines)?.span?.absoluteAddress || -1;
+        if(start == -1) {
+            return [];
+        }
+        const endSpan = _last(lines)?.span;
+        if(!endSpan) {
+            return [];
+        }
+        const length = (endSpan.absoluteAddress + endSpan.size) - start;
+
+        return disassembly.disassemble(await this.getMemory(start, length), this._dbgFile, this._mapFile, start);
     }
 
     // Breakpoints
@@ -1271,8 +1345,30 @@ or define the location manually with the launch.json->mapFile setting`
     }
 
     public async getScopeVariables() : Promise<VariableData[]> {
-        const currentScope = this._getCurrentScope()
-        return await this._variableManager.getScopeVariables(currentScope);
+        const stackInitializations = this._mapFile.filter(x => /^(pusha.?.?|[^_](dec|sub)sp[0-9]?)$/i.test(x.functionName));
+
+        const currentScope = this._getCurrentScope();
+        if(!currentScope) {
+            return [];
+        }
+
+        const scopeVars = await this._variableManager.getScopeVariables(currentScope);
+
+        if(currentScope.codeSpan) {
+            const mem = await this.getMemory(currentScope.codeSpan.absoluteAddress, currentScope.codeSpan.size);
+            const completeLine = disassembly.findInitializationCompleteLine(this._mapFile, this._dbgFile, currentScope, mem);
+
+            if(this._currentPosition.span && completeLine?.span && this._currentPosition.span.absoluteAddress < completeLine.span.absoluteAddress) {
+                scopeVars.unshift({
+                    name: "WARNING",
+                    value: "The variables at this execution point may be unreliable.",
+                    type: '',
+                    addr: 0,
+                })
+            }
+        }
+
+        return scopeVars;
     }
 
     public async getGlobalVariables() : Promise<VariableData[]> {

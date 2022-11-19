@@ -3,9 +3,14 @@
 'use strict';
 
 const path = require('path');
+const context = __dirname + '/..';
 
 /**@type {import('webpack').Configuration}*/
 const config = {
+  context,
+  stats: {
+    modules: true,
+  },
   target: 'node', // vscode extensions run in a Node.js-context 📖 -> https://webpack.js.org/configuration/node/
   cache: {
       type: 'filesystem',
@@ -19,7 +24,7 @@ const config = {
   },
   output: {
     // the bundle is stored in the 'dist' folder (check package.json), 📖 -> https://webpack.js.org/configuration/output/
-    path: path.resolve(__dirname, 'dist'),
+    path: context + '/dist',
     filename: '[name].js',
     libraryTarget: 'commonjs2',
     devtoolModuleFilenameTemplate: '../[resource-path]'
@@ -29,7 +34,7 @@ const config = {
     vscode: 'commonjs vscode' // the vscode-module is created on-the-fly and must be excluded. Add other modules that cannot be webpack'ed, 📖 -> https://webpack.js.org/configuration/externals/
   },
   resolve: {
-    modules: [path.join(__dirname, 'stubbed_modules'), 'node_modules'],
+    modules: ['stubbed_modules', 'node_modules'],
     // support reading TypeScript and JavaScript files, 📖 -> https://github.com/TypeStrong/ts-loader
     extensions: ['.ts', '.js']
   },

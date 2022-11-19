@@ -1,5 +1,5 @@
 /*!
-Copyright (c) 2021, EmpathicQubit
+Copyright (c) 2022, EmpathicQubit
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -20,17 +20,14 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 'use strict';
 
-import * as Net from 'net';
 import * as vscode from 'vscode';
-import { CancellationToken, DebugConfiguration, ProviderResult, WorkspaceFolder } from 'vscode';
-import { DebugSession } from 'vscode-debugadapter';
-import * as compile from '../lib/compile';
-import { CC65ViceDebugSession } from '../dbg/debug-session';
 import * as debugUtils from '../lib/debug-utils';
 import * as metrics from '../lib/metrics';
+import * as descriptor from './descriptor';
 import { StatsWebview } from './stats-webview';
-import { LaunchRequestArguments } from '../lib/launch-arguments';
 import cycleAnnotationProvider from './cycle-annotation-provider';
+import { activationLanguages, extId, getActiveSession, MyDebugSession } from './ui-utils';
+import _debounce from 'lodash/fp/debounce';
 
 /*
  * The compile time flag 'runMode' controls how the debug adapter is run.
@@ -38,8 +35,7 @@ import cycleAnnotationProvider from './cycle-annotation-provider';
  */
 const runMode: 'external' | 'server' | 'inline' = 'external';
 
-let cycleCommand : vscode.Disposable;
-let debugCaptureCommand : vscode.Disposable;
+let commands : vscode.Disposable[] = [];
 
 const updateConfiguration = () => {
     // THIS MUST BE FIRST
@@ -78,7 +74,7 @@ export function activate(context: vscode.ExtensionContext) {
         'bank',
     ].forEach(t => {
         StatsWebview.addEventListener(t, evt => {
-            const sesh = vscode.debug.activeDebugSession;
+            const sesh = getActiveSession();
             if(!sesh) {
                 return;
             }
@@ -99,6 +95,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     vscode.debug.onDidReceiveDebugSessionCustomEvent(async e => {
         const eventName = e.event.replace(/^cc65-vice:/, '');
+        const session : MyDebugSession = e.session;
         if(eventName === e.event) {
             return;
         }
@@ -108,7 +105,7 @@ export function activate(context: vscode.ExtensionContext) {
             StatsWebview.update(e.body);
         }
         else if(eventName == 'started') {
-            await e.session.customRequest('enableStats');
+            await session.customRequest('enableStats');
 
             const terminal =
                 vscode.window.terminals.find(x => x.name.includes('VICE Monitor'))
@@ -138,22 +135,54 @@ export function activate(context: vscode.ExtensionContext) {
 
             const action = await promise;
             if(action) {
-                e.session.customRequest('messageActioned', {
-                    name: action
+                session.customRequest('messageActioned', {
+                    name: action,
                 });
             }
         }
     });
 
-    cycleCommand = vscode.commands.registerCommand('cc65-vice.toggleCycleCounters', () => {
+    let command : vscode.Disposable;
+    command = vscode.commands.registerCommand(extId + '.toggleCycleCounters', () => {
         cycleAnnotationProvider.toggle();
     });
+    commands.push(command);
 
-    debugCaptureCommand = vscode.commands.registerCommand('cc65-vice.debugCaptureCommand', () => {
+    command = vscode.commands.registerCommand(extId + '.debugCaptureCommand', () => {
         vscode.env.clipboard.writeText("Hello world! This is me... life could be... fun for everyone");
     });
+    commands.push(command);
 
-    const provider = new CC65ViceConfigurationProvider(
+    const disassembleLine = _debounce(100, async () => {
+        const editor = vscode.window.activeTextEditor;
+        if(!editor || !activationLanguages.includes(editor.document.languageId)) {
+            return;
+        }
+
+        const sesh = getActiveSession();
+        if(!sesh) {
+            return;
+        }
+
+        const res = await sesh.customRequest('disassembleLine', {
+            filename: editor.document.uri.fsPath,
+            line: 0,
+            count: editor.document.lineCount,
+        });
+
+        if(!res?.instructions?.length) {
+            return;
+        }
+
+        StatsWebview.update({
+            disassembly: res?.instructions,
+        });
+    });
+
+    command = vscode.window.onDidChangeActiveTextEditor(disassembleLine);
+    commands.push(command);
+
+    const provider = new descriptor.CC65ViceConfigurationProvider(
         () => {
             console.log('GETTING PORT...');
             let port = context.globalState.get<number>('current-port') || 29700;
@@ -167,119 +196,33 @@ export function activate(context: vscode.ExtensionContext) {
             return port;
         }
     );
-    context.subscriptions.push(vscode.debug.registerDebugConfigurationProvider('cc65-vice', provider));
+    context.subscriptions.push(vscode.debug.registerDebugConfigurationProvider(extId, provider));
 
     console.log('Running as ', runMode);
-    let factory: CC65ViceDebugAdapterDescriptorFactory | InlineDebugAdapterFactory | DebugAdapterExecutableFactory;
+    let factory: descriptor.CC65ViceDebugAdapterDescriptorFactory | descriptor.InlineDebugAdapterFactory | descriptor.DebugAdapterExecutableFactory;
     // Do I need this or will it be broken?
     switch (runMode) {
         // This indentation tho...
         case 'server':
-            factory = new CC65ViceDebugAdapterDescriptorFactory();
+            factory = new descriptor.CC65ViceDebugAdapterDescriptorFactory();
             break;
 
         case 'inline':
-            factory = new InlineDebugAdapterFactory();
+            factory = new descriptor.InlineDebugAdapterFactory();
             break;
 
         case 'external': default:
-            factory = new DebugAdapterExecutableFactory();
+            factory = new descriptor.DebugAdapterExecutableFactory();
             break;
     }
 
-    context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory('cc65-vice', factory));
+    context.subscriptions.push(vscode.debug.registerDebugAdapterDescriptorFactory(extId, factory));
     if ('dispose' in factory) {
         context.subscriptions.push(factory);
     }
 }
 
 export function deactivate() {
-    cycleCommand.dispose();
+    commands.forEach(x => x.dispose());
     cycleAnnotationProvider.deactivate();
-}
-
-const newSession = () : DebugSession => {
-    const sesh = new CC65ViceDebugSession();
-
-    return sesh;
-}
-
-class DebugAdapterExecutableFactory implements vscode.DebugAdapterDescriptorFactory {
-    createDebugAdapterDescriptor(_session: vscode.DebugSession, executable: vscode.DebugAdapterExecutable | undefined): ProviderResult<vscode.DebugAdapterDescriptor> {
-        return executable;
-    }
-}
-
-class CC65ViceConfigurationProvider implements vscode.DebugConfigurationProvider {
-    private _portGetter: () => number;
-    constructor(portGetter: () => number) {
-        this._portGetter = portGetter;
-    }
-
-    /**
-    * Massage a debug configuration just before a debug session is being launched,
-    * e.g. add all missing attributes to the debug configuration.
-    */
-    resolveDebugConfiguration(folder: WorkspaceFolder | undefined, c: DebugConfiguration, token?: CancellationToken): ProviderResult<DebugConfiguration> {
-        const config = <LaunchRequestArguments><any>c;
-        // if launch.json is missing or empty
-        if (!c.type && !config.request && !c.name) {
-            const editor = vscode.window.activeTextEditor;
-            if (editor && editor.document.languageId === 'makefile') {
-                c.type = 'cc65-vice';
-                c.name = 'Build and launch VICE';
-                config.request = 'launch';
-                config.build = {
-                    command: compile.DEFAULT_BUILD_COMMAND,
-                    cwd: '${workspaceFolder}',
-                    args: compile.DEFAULT_BUILD_ARGS,
-                }
-                config.stopOnEntry = true;
-            }
-        }
-
-        if(c.request != 'attach' && !(config.port && config.port > 0)) {
-            config.port = this._portGetter();
-        }
-        config.cc65Home = vscode.workspace.getConfiguration('cc65vice').get('cc65Home');
-        config.viceDirectory = vscode.workspace.getConfiguration('cc65vice').get('viceDirectory');
-        config.appleWinDirectory = vscode.workspace.getConfiguration('cc65vice').get('appleWinDirectory');
-        config.mesenDirectory = vscode.workspace.getConfiguration('cc65vice').get('mesenDirectory');
-        config.preferX64OverX64sc = vscode.workspace.getConfiguration('cc65vice').get('preferX64OverX64sc');
-        config.runAhead = vscode.workspace.getConfiguration('cc65vice').get('runAhead');
-
-        return c;
-    }
-}
-
-class CC65ViceDebugAdapterDescriptorFactory implements vscode.DebugAdapterDescriptorFactory {
-
-    private server?: Net.Server;
-
-    createDebugAdapterDescriptor(session: vscode.DebugSession, executable: vscode.DebugAdapterExecutable | undefined): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
-        if (!this.server) {
-            // start listening on a random port
-            this.server = Net.createServer(socket => {
-                const session = newSession();
-                session.setRunAsServer(true);
-                session.start(<NodeJS.ReadableStream>socket, socket);
-            }).listen(0);
-        }
-
-        // make VS Code connect to debug server
-        return new vscode.DebugAdapterServer((<Net.AddressInfo>this.server.address()).port);
-    }
-
-    dispose() {
-        if (this.server) {
-            this.server.close();
-        }
-    }
-}
-
-class InlineDebugAdapterFactory implements vscode.DebugAdapterDescriptorFactory {
-
-    createDebugAdapterDescriptor(_session: vscode.DebugSession): ProviderResult<vscode.DebugAdapterDescriptor> {
-        return new (<any>vscode).DebugAdapterInlineImplementation();
-    }
 }

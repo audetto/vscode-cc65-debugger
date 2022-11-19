@@ -19,7 +19,7 @@ describe('Stack', () => {
     console.log(VICE_ARGS);
 
     const LOCALVARS_C = path.join(BUILD_CWD, "src/test_local_vars.c");
-    const LOCALVARS_LASTLINE = 52;
+    const LOCALVARS_LASTLINE = 54;
 
     afterEach(testShared.cleanup);
 
@@ -142,7 +142,7 @@ describe('Stack', () => {
                     index: 3,
                     name: 'main',
                     file: MAIN_C,
-                    line: 12
+                    line: 14
                 }
             ],
             count: 4
@@ -229,7 +229,7 @@ describe('Stack', () => {
                         index: 3,
                         name: 'main',
                         file: MAIN_C,
-                        line: 12
+                        line: 14
                     }
                 ],
                 count: 4
@@ -300,7 +300,7 @@ describe('Stack', () => {
         await testShared.waitFor(rt, 'end');
 
         console.log(locals);
-        assert.deepStrictEqual(locals.map(x => x.name).sort(), ['cool', 'i', 'j', 'lol', 'random', 'whoa', 'wow', 'xy']);
+        assert.deepStrictEqual(locals.map(x => x.name).sort(), ['blarg', 'blerg', 'cool', 'i', 'j', 'k', 'lol', 'random', 'whoa', 'wow', 'xy']);
 
         console.log(randomVal);
         assert.strictEqual(random.value, "0x03fc");

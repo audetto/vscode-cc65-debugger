@@ -3,8 +3,21 @@ import _flow from 'lodash/fp/flow';
 import _max from 'lodash/fp/max';
 import _reverse from 'lodash/fp/reverse';
 import _takeWhile from 'lodash/fp/takeWhile';
+import * as debugUtils from './debug-utils';
 import * as debugFile from './debug-file';
 import * as mapFile from './map-file';
+
+export interface Instruction {
+    /** The address of the instruction. Treated as a hex value if prefixed with '0x', or as a decimal value otherwise. */
+    address: string;
+    /** Optional raw bytes representing the instruction and its operands, in an implementation-defined format. */
+    instructionBytes: string;
+    /** Text representing the instruction and its operands, in an implementation-defined format. */
+    instruction: string;
+    filename: string;
+    /** The line within the source location that corresponds to this instruction, if any. Zero-indexed */
+    line: number;
+}
 
 const opcodeSizes = [
     1, 6, 1, 2, 2, 2, 2, 2, 1, 2, 1, 1, 3, 3, 3, 3,
@@ -44,6 +57,25 @@ export const opcodeCycles = [
     2,  6,  2,  8,  3,  3,  5,  5,  2,  2,  2,  2,  4,  4,  6,  6,
     2,  5, -1,  8,  4,  4,  6,  6,  2,  4,  2,  7,  4,  4,  7,  7
 ]
+
+export const opcodeNames = [
+    "BRK", "ORA", "KIL", "SLO", "NOP", "ORA", "ASL", "SLO", "PHP", "ORA", "ASL", "ANC", "NOP", "ORA", "ASL", "SLO",
+    "BPL", "ORA", "KIL", "SLO", "NOP", "ORA", "ASL", "SLO", "CLC", "ORA", "NOP", "SLO", "NOP", "ORA", "ASL", "SLO",
+    "JSR", "AND", "KIL", "RLA", "BIT", "AND", "ROL", "RLA", "PLP", "AND", "ROL", "ANC", "BIT", "AND", "ROL", "RLA",
+    "BMI", "AND", "KIL", "RLA", "NOP", "AND", "ROL", "RLA", "SEC", "AND", "NOP", "RLA", "NOP", "AND", "ROL", "RLA",
+    "RTI", "EOR", "KIL", "SRE", "NOP", "EOR", "LSR", "SRE", "PHA", "EOR", "LSR", "ALR", "JMP", "EOR", "LSR", "SRE",
+    "BVC", "EOR", "KIL", "SRE", "NOP", "EOR", "LSR", "SRE", "CLI", "EOR", "NOP", "SRE", "NOP", "EOR", "LSR", "SRE",
+    "RTS", "ADC", "KIL", "RRA", "NOP", "ADC", "ROR", "RRA", "PLA", "ADC", "ROR", "ARR", "JMP", "ADC", "ROR", "RRA",
+    "BVS", "ADC", "KIL", "RRA", "NOP", "ADC", "ROR", "RRA", "SEI", "ADC", "NOP", "RRA", "NOP", "ADC", "ROR", "RRA",
+    "NOP", "STA", "NOP", "SAX", "STY", "STA", "STX", "SAX", "DEY", "NOP", "TXA", "XAA", "STY", "STA", "STX", "SAX",
+    "BCC", "STA", "KIL", "AHX", "STY", "STA", "STX", "SAX", "TYA", "STA", "TXS", "TAS", "SHY", "STA", "SHX", "AHX",
+    "LDY", "LDA", "LDX", "LAX", "LDY", "LDA", "LDX", "LAX", "TAY", "LDA", "TAX", "LAX", "LDY", "LDA", "LDX", "LAX",
+    "BCS", "LDA", "KIL", "LAX", "LDY", "LDA", "LDX", "LAX", "CLV", "LDA", "TSX", "LAS", "LDY", "LDA", "LDX", "LAX",
+    "CPY", "CMP", "NOP", "DCP", "CPY", "CMP", "DEC", "DCP", "INY", "CMP", "DEX", "AXS", "CPY", "CMP", "DEC", "DCP",
+    "BNE", "CMP", "KIL", "DCP", "NOP", "CMP", "DEC", "DCP", "CLD", "CMP", "NOP", "DCP", "NOP", "CMP", "DEC", "DCP",
+    "CPX", "SBC", "NOP", "ISC", "CPX", "SBC", "INC", "ISC", "INX", "SBC", "NOP", "SBC", "CPX", "SBC", "INC", "ISC",
+    "BEQ", "SBC", "KIL", "ISC", "NOP", "SBC", "INC", "ISC", "SED", "SBC", "NOP", "ISC", "NOP", "SBC", "INC", "ISC",
+];
 
 export const maxOpCodeSize = _max(opcodeSizes)!;
 
@@ -88,11 +120,17 @@ export function verifyScope(dbgFile: debugFile.Dbgfile, scope: debugFile.Scope, 
     return !nonMatch;
 }
 
-export function opCodeFind<T>(mem: Buffer, handler: (cmd: number, rest: Buffer, index: number) => T) : T | undefined {
+export function opCodeFind<T>(mem: Buffer, handler: (cmd: number, rest: Buffer, index: number, name?: string) => T) : T | undefined {
     let cmd = 0x100;
     for(let cursor = 0; cursor < mem.length; cursor += opcodeSizes[cmd] || 0) {
         cmd = mem.readUInt8(cursor);
-        const res = handler(cmd, mem.slice(cursor + 1, cursor + opcodeSizes[cmd]), cursor);
+        let res : T;
+        if(handler.length == 3) {
+            res = handler(cmd, mem.slice(cursor + 1, cursor + opcodeSizes[cmd]), cursor);
+        }
+        else {
+            res = handler(cmd, mem.slice(cursor + 1, cursor + opcodeSizes[cmd]), cursor, opcodeNames[cmd]);
+        }
         if(res) {
             return res;
         }
@@ -110,6 +148,28 @@ interface StackChanges {
 export interface ScopeAddress {
     scope: debugFile.Scope,
     address: number,
+}
+
+export function findInitializationCompleteLine(mpFile: mapFile.MapRef[], dbgFile: debugFile.Dbgfile, scope: debugFile.Scope, mem: Buffer) : debugFile.SourceLine | undefined {
+    const stackInitializations = mpFile.filter(x => /^(pusha.?.?|[^_](dec|sub)sp[0-9]?)$/i.test(x.functionName));
+    const startAddress = scope.codeSpan?.absoluteAddress ?? -1;
+    let lastFoundLine : debugFile.SourceLine | undefined;
+    let currentLine : debugFile.SourceLine | undefined;
+    return opCodeFind(mem, (cmd, rest, pos) => {
+        const newLine = scope.codeSpan?.lines.find(x => x.span && x.span.absoluteAddress <= startAddress + pos && startAddress + pos < x.span.absoluteAddress + x.span.size);
+        if(cmd == 0x4c || cmd == 0x20) { // JMP, JSR
+            const addr = rest.readUInt16LE(0);
+            if(stackInitializations.find(x => x.functionAddress === addr)) {
+                lastFoundLine = newLine;
+            }
+        }
+
+        if(currentLine && newLine != currentLine && lastFoundLine != currentLine) {
+            return newLine;
+        }
+
+        currentLine = newLine;
+    });
 }
 
 /**
@@ -179,4 +239,48 @@ export function findStackChangesForScope(mpFile: mapFile.MapRef[], searchScope: 
         jumpAddresses,
         descendants,
     }
+}
+
+export function disassemble(mem: Buffer, dbgFile: debugFile.Dbgfile, mpFile: mapFile.MapRef[], startAddress: number) : Instruction[] {
+    const instructions : Instruction[] = [];
+    opCodeFind(mem, (cmd, rest, index, name) => {
+        let restVal : number = -1;
+        let restFmt = '';
+        if(rest.length == 2) {
+            restVal = rest.readUInt16LE(0);
+            restFmt = ` \$${restVal.toString(16).padStart(4, '0')}`;
+            let functionName = '';
+            let map : mapFile.MapRef | undefined;
+            const lab = dbgFile.labs.find(x => x.val == restVal);
+            if(lab) {
+                functionName = lab.name;
+            }
+            else if(map = mpFile.find(x => x.functionAddress == restVal)) {
+                functionName = map.functionName;
+            }
+
+            if(functionName) {
+                restFmt = `${restFmt.padStart(6, ' ')} ; ${functionName}`;
+            }
+        }
+        else if (rest.length == 1) {
+            restVal = rest.readUInt8(0);
+            restFmt = '$' + restVal.toString(16).padStart(2, '0')
+            restFmt = restFmt.padStart(6, ' ');
+        }
+        else {
+            restFmt = restFmt.padStart(6, ' ');
+        }
+
+        const line = debugUtils.getLineFromAddress([], dbgFile, startAddress + index);
+        instructions.push({
+            address: (startAddress + index).toString(),
+            instruction: (name || '') + restFmt,
+            instructionBytes: String.fromCharCode(cmd, ...rest),
+            filename: line.file?.name || '',
+            line: line.num,
+        });
+    });
+
+    return instructions;
 }

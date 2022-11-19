@@ -26,8 +26,10 @@ unsigned char globby;
 unsigned char test_local_vars_main(void) {
     static unsigned char weehah;
     static unsigned char bonza = 0x42;
-    unsigned char i;
-    unsigned int j;
+    register unsigned char blarg = 1;
+    register unsigned char blerg = 2;
+    unsigned char i = 3;
+    unsigned int j = 4, k = 4;
     unsigned int *random;
     unsigned char *lol;
     signed char whoa;

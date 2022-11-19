@@ -1,5 +1,47 @@
 # Changelog
 
+### [6.6.2](https://www.github.com/empathicqubit/vscode-cc65-debugger/compare/v6.6.1...v6.6.2) (2022-11-14)
+
+
+### Bug Fixes
+
+* Partially fix NES ([2bd296e](https://www.github.com/empathicqubit/vscode-cc65-debugger/commit/2bd296eab5c71c874ec055977742284912d240b5))
+
+### [6.6.1](https://www.github.com/empathicqubit/vscode-cc65-debugger/compare/v6.6.0...v6.6.1) (2022-11-14)
+
+
+### Bug Fixes
+
+* Check the function binaries on startup, to avoid false starts. ([b32003d](https://www.github.com/empathicqubit/vscode-cc65-debugger/commit/b32003dbbdf13bd40eedb37ed92974bc5cc982e2))
+* Fix an issue with step out using a temp breakpoint ([2f926b0](https://www.github.com/empathicqubit/vscode-cc65-debugger/commit/2f926b068b9ca8eed282b99bfb29478c7298b74f))
+
+## [6.6.0](https://www.github.com/empathicqubit/vscode-cc65-debugger/compare/v6.5.0...v6.6.0) (2022-11-08)
+
+
+### Features
+
+* Add syntax highlighting for debug, map, and label files ([f64a939](https://www.github.com/empathicqubit/vscode-cc65-debugger/commit/f64a93975509f56ad9ad3fe588fe604c56079786))
+
+## [6.5.0](https://www.github.com/empathicqubit/vscode-cc65-debugger/compare/v6.4.0...v6.5.0) (2022-11-08)
+
+
+### Features
+
+* Basic disassembly view ([258db5b](https://www.github.com/empathicqubit/vscode-cc65-debugger/commit/258db5bc3ce8e9dd4bcf8a545e866b75a04e8c76))
+
+
+### Bug Fixes
+
+* fix an issue with palette loading on the sprite tab ([350bb4f](https://www.github.com/empathicqubit/vscode-cc65-debugger/commit/350bb4f6a922f44723ed1b289d7a123a62dbde85))
+* Post a warning about unreliable variable values. ([4a19928](https://www.github.com/empathicqubit/vscode-cc65-debugger/commit/4a199288570b4d95f736c59765ed032d6875f630))
+
+## [6.4.0](https://www.github.com/empathicqubit/vscode-cc65-debugger/compare/v6.3.7...v6.4.0) (2022-11-01)
+
+
+### Features
+
+* Add devcontainer.json for easier development in Codespaces ([09102eb](https://www.github.com/empathicqubit/vscode-cc65-debugger/commit/09102eb9d4cc6476829bd9796d2e1d454598f8c8))
+
 ### [6.3.7](https://www.github.com/empathicqubit/vscode-cc65-debugger/compare/v6.3.6...v6.3.7) (2022-10-29)
 
 

@@ -1,5 +1,5 @@
 /*!
-Copyright (c) 2021, EmpathicQubit
+Copyright (c) 2022, EmpathicQubit
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -18,8 +18,19 @@ COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
-import { _statsWebviewContent } from "./stats-webview-content";
+'use strict';
 
-(window as any).Buffer = require('buffer/').Buffer;
+interface vscode {
+    postMessage(message: {[key: string]: any, request: string}): void;
+}
 
-(window as any).statsWebviewContent = _statsWebviewContent
+declare global {
+    interface Window {
+        acquireVsCodeApi : () => vscode;
+        Buffer: any;
+    }
+}
+
+window.Buffer = require('buffer/').Buffer;
+
+import "./stats";

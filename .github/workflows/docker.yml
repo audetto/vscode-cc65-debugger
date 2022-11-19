@@ -13,14 +13,14 @@ jobs:
 
     steps:
     - name: Login to DockerHub
-      uses: docker/login-action@v1
+      uses: docker/login-action@v2.1.0
       with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
+      name: Checkout Code
       with:
           ref: master
-    - run: docker pull empathicqubit/vscode-cc65-debugger-build
     - run: cd docker && docker build -t empathicqubit/vscode-cc65-debugger-build .
     - run: cd docker && docker build -t empathicqubit/vscode-cc65-debugger-devcontainer -f devcontainer.Dockerfile .
     - run: docker push empathicqubit/vscode-cc65-debugger-build

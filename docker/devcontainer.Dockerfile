@@ -38,12 +38,30 @@ ENV desktop_lite_package_list \
     nano \
     locales
 
+ENV audio_lite_package_list \
+    make \
+    cmake \
+    libasound2-dev \
+    ca-certificates \
+    libnotify-dev \
+    libnotify4 \
+    libssl-dev \
+    openssl \
+    pulseaudio \
+    cargo \
+    mumble-server
+
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends libglew2.0 libglew-dev ${desktop_lite_package_list} && \
+    apt-get install -y --no-install-recommends sudo less psmisc libglew2.0 libglew-dev ${desktop_lite_package_list} ${audio_lite_package_list} && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN /build-vice.sh 3.6 default
+RUN ln -s /vices/default/vice-3.6/data /usr/local/share/vice
 
+RUN useradd -m -u 1000 vscode
+RUN chsh -s /bin/bash vscode
+RUN usermod -a -G sudo vscode
+ADD ./sudoers /etc/sudoers.d/nopasswd
 USER 1000
 
 ENV PATH ${PATH}:/vices/default/vice-3.6/src

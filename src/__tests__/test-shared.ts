@@ -10,6 +10,10 @@ import { MachineType } from '../lib/debug-file';
 
 console.log('PROCESS', process.pid);
 
+beforeEach(() => {
+    expect.getState().started = new Date().getTime();
+});
+
 metrics.options.disabled = true;
 
 const ports = {
@@ -24,7 +28,7 @@ const ports = {
 }
 
 export async function portGetter() : Promise<number> {
-    const testName = path.basename(expect.getState().testPath);
+    const testName = path.basename(expect.getState().testPath!);
     const val = ports[testName];
     if(!val) {
         throw new Error(`You need to add a port for the test file: "${testName}"`);
@@ -69,9 +73,9 @@ export const DEFAULT_PROGRAM =
     process.env.TEST_PROGRAM
     ? process.env.TEST_PROGRAM
     : path.normalize(DEFAULT_BUILD_CWD + '/program.c64');
-export const DEFAULT_MAP_FILE = DEFAULT_PROGRAM + '.map';
-export const DEFAULT_DEBUG_FILE = DEFAULT_PROGRAM + '.dbg';
-export const DEFAULT_LABEL_FILE = DEFAULT_PROGRAM + '.lbl';
+export const DEFAULT_MAP_FILE = DEFAULT_PROGRAM.replace(/\.dsk/g, '') + '.map';
+export const DEFAULT_DEBUG_FILE = DEFAULT_PROGRAM.replace(/\.dsk/g, '') + '.dbg';
+export const DEFAULT_LABEL_FILE = DEFAULT_PROGRAM.replace(/\.dsk/g, '') + '.lbl';
 export const DEFAULT_VICE_DIRECTORY =
     typeof process.env.VICE_DIRECTORY != 'undefined'
     ? process.env.VICE_DIRECTORY
@@ -143,11 +147,13 @@ export async function cleanup() : Promise<void> {
 }
 
 export async function selectCTest(rt: Runtime, testName: string): Promise<void> {
+    const testSelector = rt._dbgFile.labs.find(x => x.name == `_testSelector`)!;
     const lab = rt._dbgFile.labs.find(x => x.name == `_${testName}_main`)!;
     const buf = Buffer.alloc(2);
     buf.writeUInt16LE(lab.val);
     console.log(lab);
-    await rt.setMemory(0x03fc, buf);
+    console.log(testSelector.val)
+    await rt.setMemory(testSelector.val, buf);
 }
 
 export function getLabel(rt: Runtime, name: string) : number {
@@ -164,14 +170,15 @@ export const testSkipMac : typeof test.skip = ((...args) => {
 }) as any;
 
 export async function waitFor(rt: Runtime, event: string, assertion?: ((...x: any[]) => void)) : Promise<void> {
-    const err = new Error('Timed out waiting for assertion');
+    const delay = Math.abs(35000 - (new Date().getTime() - expect.getState().started));
+    const err = new Error('Timed out waiting for assertion: ' + delay);
     await new Promise<void>((res, rej) => {
         let finished = false;
         setTimeout(() => {
             if(!finished) {
                 rej(err);
             }
-        }, 10000);
+        }, delay);
 
         const listener = (...args) => {
             try {

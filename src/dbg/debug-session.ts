@@ -1,5 +1,6 @@
 import * as child_process from 'child_process';
 import * as compile from '../lib/compile';
+import * as customRequests from '../lib/custom-requests';
 import _debounce from 'lodash/fp/debounce';
 import { basename } from 'path';
 import {
@@ -33,6 +34,34 @@ enum VariablesReferenceFlag {
     ADDR_MASK = 0x00FFFF,
 }
 // MAX = 0x8000000000000
+
+function noOp() {};
+
+function cleanup(callback: (code: number) => void) {
+
+  // attach user callback to the process event emitter
+  // if no callback, it will still exit gracefully on Ctrl-C
+  callback = callback || noOp;
+  process.on('cleanup', callback);
+
+  // do app specific cleaning before exiting
+  process.on('exit', (a) => {
+    process.emit(<any>'cleanup', a);
+  });
+
+  // catch ctrl+c event and exit normally
+  process.on('SIGINT', function () {
+    console.log('Ctrl-C...');
+    process.exit(2);
+  });
+
+  //catch uncaught exceptions, trace, then exit normally
+  process.on('uncaughtException', function(e) {
+    console.log('Uncaught Exception...');
+    console.log(e.stack);
+    process.exit(1);
+  });
+};
 
 /**
  * This class is designed to interface the debugger Runtime with Visual Studio's request model.
@@ -101,7 +130,20 @@ export class CC65ViceDebugSession extends LoggingDebugSession {
         this.setDebuggerColumnsStartAt1(false);
 
         this._runtime = new Runtime(
-            <debugUtils.ExecHandler>((file, args, opts) => this._execHandler(file, args, opts))
+            <debugUtils.ExecHandler>(async (file, args, opts) => {
+                const pids = await this._execHandler(file, args, opts);
+
+                cleanup(() => {
+                    for(const pid of pids) {
+                        try {
+                            process.kill(pid);
+                        }
+                        catch {}
+                    }
+                });
+
+                return pids;
+            })
         );
 
         this._bounceBuf = _debounce(250, async () => {
@@ -253,6 +295,55 @@ export class CC65ViceDebugSession extends LoggingDebugSession {
         });
     }
 
+    /**
+    * The 'initialize' request is the first request called by the frontend
+    * to interrogate the features the debug adapter provides.
+    */
+    protected initializeRequest(response: DebugProtocol.InitializeResponse, args: DebugProtocol.InitializeRequestArguments): void {
+
+        // build and return the capabilities of this debug adapter:
+        response.body = response.body || {};
+
+        response.body = {
+            ...response.body,
+
+            // the adapter implements the configurationDoneRequest.
+            supportsConfigurationDoneRequest: true,
+
+            // make VS Code to use 'evaluate' when hovering over source
+            supportsEvaluateForHovers: true,
+
+            supportsDisassembleRequest: true,
+
+            supportsStepBack: false,
+
+            supportsSetVariable: true,
+
+            // make VS Code to support data breakpoints
+            supportsDataBreakpoints: false,
+
+            supportTerminateDebuggee: true,
+            supportsTerminateRequest: true,
+
+            // make VS Code to support completion in REPL
+            supportsCompletionsRequest: false,
+            completionTriggerCharacters: [ ".", "[" ],
+
+            // make VS Code to send cancelRequests
+            supportsCancelRequest: true,
+
+            // make VS Code send the breakpointLocations request
+            supportsBreakpointLocationsRequest: true,
+        };
+
+        this.sendResponse(response);
+
+        // since this debug adapter can accept configuration requests like 'setBreakpoint' at any time,
+        // we request them early by sending an 'initializeRequest' to the frontend.
+        // The frontend will end the configuration sequence by calling 'configurationDone' request.
+        this.sendEvent(new InitializedEvent());
+    }
+
     protected async customRequest(command: string, response: DebugProtocol.InitializeResponse, args: DebugProtocol.InitializeRequestArguments, request: DebugProtocol.Request): Promise<void> {
         response.success = true;
 
@@ -327,6 +418,21 @@ export class CC65ViceDebugSession extends LoggingDebugSession {
             else if(command == 'enableStats') {
                 await this._runtime.enableStats();
             }
+            else if(command == 'disassembleLine') {
+                const a = args as any as customRequests.DisassembleLineRequest['arguments'];
+                const instructions = await this._runtime.disassembleLine(a.filename, a.line, a.count);
+                (response as any as DebugProtocol.DisassembleResponse).body = {
+                    instructions: instructions.map(x => ({
+                        address: x.address,
+                        instructionBytes: x.instructionBytes,
+                        instruction: x.instruction,
+                        location: {
+                            path: x.filename,
+                        },
+                        line: x.line < 0 ? undefined : x.line,
+                    })),
+                };
+            }
             else {
                 response.success = false;
                 response.message = 'Unknown command';
@@ -336,53 +442,9 @@ export class CC65ViceDebugSession extends LoggingDebugSession {
             response.success = false
             response.message = e.message;
         }
-
-        this.sendResponse(response);
-    }
-
-    /**
-    * The 'initialize' request is the first request called by the frontend
-    * to interrogate the features the debug adapter provides.
-    */
-    protected initializeRequest(response: DebugProtocol.InitializeResponse, args: DebugProtocol.InitializeRequestArguments): void {
-
-        // build and return the capabilities of this debug adapter:
-        response.body = response.body || {};
-
-        // the adapter implements the configurationDoneRequest.
-        response.body.supportsConfigurationDoneRequest = true;
-
-        // make VS Code to use 'evaluate' when hovering over source
-        response.body.supportsEvaluateForHovers = true;
-
-        response.body.supportsDisassembleRequest = false;
-
-        response.body.supportsStepBack = false;
-
-        response.body.supportsSetVariable = true;
-
-        // make VS Code to support data breakpoints
-        response.body.supportsDataBreakpoints = false;
-
-        response.body.supportTerminateDebuggee = true;
-        response.body.supportsTerminateRequest = true;
-
-        // make VS Code to support completion in REPL
-        response.body.supportsCompletionsRequest = false;
-        response.body.completionTriggerCharacters = [ ".", "[" ];
-
-        // make VS Code to send cancelRequests
-        response.body.supportsCancelRequest = true;
-
-        // make VS Code send the breakpointLocations request
-        response.body.supportsBreakpointLocationsRequest = true;
-
-        this.sendResponse(response);
-
-        // since this debug adapter can accept configuration requests like 'setBreakpoint' at any time,
-        // we request them early by sending an 'initializeRequest' to the frontend.
-        // The frontend will end the configuration sequence by calling 'configurationDone' request.
-        this.sendEvent(new InitializedEvent());
+        finally {
+            this.sendResponse(response);
+        }
     }
 
     /**
@@ -451,8 +513,9 @@ export class CC65ViceDebugSession extends LoggingDebugSession {
             response.success = false;
             response.message = (<any>e).stack.toString();
         }
-
-        this.sendResponse(response);
+        finally {
+            this.sendResponse(response);
+        }
     }
 
     protected async launchRequest(response: DebugProtocol.LaunchResponse, args: LaunchRequestArguments) {
@@ -509,8 +572,9 @@ export class CC65ViceDebugSession extends LoggingDebugSession {
             response.success = false;
             response.message = (<any>e).stack.toString();
         }
-
-        this.sendResponse(response);
+        finally {
+            this.sendResponse(response);
+        }
     }
 
     protected async setBreakPointsRequest(response: DebugProtocol.SetBreakpointsResponse, args: DebugProtocol.SetBreakpointsArguments): Promise<void> {
@@ -520,7 +584,6 @@ export class CC65ViceDebugSession extends LoggingDebugSession {
                 response.body = {
                     breakpoints: [],
                 };
-                this.sendResponse(response);
                 return;
             }
 
@@ -548,12 +611,13 @@ export class CC65ViceDebugSession extends LoggingDebugSession {
             response.body = {
                 breakpoints: actualBreakpoints
             };
-            this.sendResponse(response);
         }
         catch(e) {
             console.error(e);
             response.success = false
             response.message = e
+        }
+        finally {
             this.sendResponse(response);
         }
     }
@@ -569,8 +633,9 @@ export class CC65ViceDebugSession extends LoggingDebugSession {
             response.success = false;
             response.message = (<any>e).stack.toString();
         }
-
-        this.sendResponse(response);
+        finally {
+            this.sendResponse(response);
+        }
     }
 
     protected breakpointLocationsRequest(response: DebugProtocol.BreakpointLocationsResponse, args: DebugProtocol.BreakpointLocationsArguments, request?: DebugProtocol.Request): void {
@@ -822,8 +887,9 @@ export class CC65ViceDebugSession extends LoggingDebugSession {
             response.success = false;
             response.message = e.message;
         }
-
-        this.sendResponse(response);
+        finally {
+            this.sendResponse(response);
+        }
     }
 
     protected async nextRequest(response: DebugProtocol.NextResponse, args: DebugProtocol.NextArguments): Promise<void> {
@@ -835,8 +901,9 @@ export class CC65ViceDebugSession extends LoggingDebugSession {
             response.success = false;
             response.message = e.message;
         }
-
-        this.sendResponse(response);
+        finally {
+            this.sendResponse(response);
+        }
     }
 
     protected async stepInRequest(response: DebugProtocol.StepInResponse, args: DebugProtocol.StepInArguments, request?: DebugProtocol.Request) : Promise<void> {
@@ -848,8 +915,9 @@ export class CC65ViceDebugSession extends LoggingDebugSession {
             response.success = false;
             response.message = e.message;
         }
-
-        this.sendResponse(response);
+        finally {
+            this.sendResponse(response);
+        }
     }
 
     protected async stepOutRequest(response: DebugProtocol.StepOutResponse, args: DebugProtocol.StepOutArguments, request?: DebugProtocol.Request): Promise<void> {
@@ -861,8 +929,9 @@ export class CC65ViceDebugSession extends LoggingDebugSession {
             response.success = false;
             response.message = e.message;
         }
-
-        this.sendResponse(response);
+        finally {
+            this.sendResponse(response);
+        }
     }
 
     protected stepBackRequest(response: DebugProtocol.StepBackResponse, args: DebugProtocol.StepBackArguments): void {
@@ -878,8 +947,9 @@ export class CC65ViceDebugSession extends LoggingDebugSession {
             response.success = false;
             response.message = e.message;
         }
-
-        this.sendResponse(response);
+        finally {
+            this.sendResponse(response);
+        }
     }
 
     protected async setVariableRequest(response: DebugProtocol.SetVariableResponse, args: DebugProtocol.SetVariableArguments, request?: DebugProtocol.Request): Promise<void> {
@@ -915,8 +985,9 @@ export class CC65ViceDebugSession extends LoggingDebugSession {
             response.success = false;
             response.message = e.toString();
         }
-
-        this.sendResponse(response);
+        finally {
+            this.sendResponse(response);
+        }
     }
 
     protected async evaluateRequest(response: DebugProtocol.EvaluateResponse, args: DebugProtocol.EvaluateArguments): Promise<void> {
@@ -927,7 +998,6 @@ export class CC65ViceDebugSession extends LoggingDebugSession {
                     result: 'Not found',
                     variablesReference: 0,
                 };
-                this.sendResponse(response);
                 return;
             }
 
@@ -942,7 +1012,9 @@ export class CC65ViceDebugSession extends LoggingDebugSession {
             response.success = false;
             response.message = e.toString();
         }
-        this.sendResponse(response);
+        finally {
+            this.sendResponse(response);
+        }
     }
 
     protected setDataBreakpointsRequest(response: DebugProtocol.SetDataBreakpointsResponse, args: DebugProtocol.SetDataBreakpointsArguments): void {
@@ -963,6 +1035,30 @@ export class CC65ViceDebugSession extends LoggingDebugSession {
         }
 
         this.sendResponse(response);
+    }
+
+    protected async disassembleRequest(response: DebugProtocol.DisassembleResponse, args: DebugProtocol.DisassembleArguments, request?: DebugProtocol.Request): Promise<void> {
+        try {
+            const instructions = await this._runtime.disassemble(args.instructionOffset || -1, args.instructionCount);
+            response.body = {
+                instructions: instructions.map(x => ({
+                    address: x.address,
+                    instructionBytes: x.instructionBytes,
+                    instruction: x.instruction,
+                    location: {
+                        path: x.filename,
+                    },
+                    line: x.line,
+                })),
+            };
+        }
+        catch(e) {
+            response.success = false;
+            response.message = e.toString();
+        }
+        finally {
+            this.sendResponse(response);
+        }
     }
 
     protected completionsRequest(response: DebugProtocol.CompletionsResponse, args: DebugProtocol.CompletionsArguments): void {
